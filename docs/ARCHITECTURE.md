@@ -59,7 +59,7 @@ Clients may hide weekends in the UI. The API still decides. `GET /api/v1/timeshe
 | Weekdays only | Saturday and Sunday lock reason `weekend` |
 | Holidays | `holidays.date` lock reason `holiday` |
 | Approved leave | Overlapping approved leave lock reason `leave` |
-| Previous months | Read-only lock reason `previous_month` |
+| Older than yesterday | Lock reason `entry_window`. Today and yesterday stay open, including when yesterday is in the previous month. |
 | Future dates | Lock reason `future` |
 | Submitted | Lock reason `pending_approval` until a manager acts |
 | Rejected | Owner may edit and submit again |

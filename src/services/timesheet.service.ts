@@ -10,8 +10,8 @@ import { TimesheetEntry } from '../models/TimesheetEntry';
 import type { ActorContext } from '../types/actor';
 import type { LockReason, TimesheetStatus } from '../types/enums';
 import { AppError } from '../utils/AppError';
-import { monthKey, todayDateString } from '../utils/dates';
-import { evaluateFillability, evaluateStructuralLock, lockMessage } from '../utils/fillability';
+import { addDays, monthKey, todayDateString } from '../utils/dates';
+import { describeEntryWindow, ENTRY_WINDOW_ERROR, evaluateFillability, lockMessage } from '../utils/fillability';
 import { pageMeta } from '../utils/http';
 import { mapEntry, mapTimesheet, mapUser, isUserLike } from '../utils/mappers';
 import { isDuplicateKeyError } from '../utils/mongo';
@@ -23,12 +23,19 @@ import { assertCanManageUser, assertCanViewUser, directReportIds } from './acces
 import { recordAudit } from './audit.service';
 import { notify, notifyManagerOrAdmins } from './notification.service';
 
+function canBypassPastWindow(actor: ActorContext): boolean {
+  return env.entryWindowOverrideRoles.includes(actor.role);
+}
+
 function throwLocked(reasons: LockReason[]) {
+  if (reasons.includes('entry_window')) {
+    throw new AppError(409, 'TIMESHEET_ENTRY_WINDOW_CLOSED', ENTRY_WINDOW_ERROR, { lockReasons: reasons });
+  }
   const code = reasons.includes('pending_approval') || reasons.includes('approved') ? 'TIMESHEET_LOCKED' : 'NOT_FILLABLE';
   throw new AppError(409, code, lockMessage(reasons), { lockReasons: reasons });
 }
 
-async function dayContext(userId: string, date: string) {
+async function dayContext(userId: string, date: string, bypassPastWindow = false) {
   const today = todayDateString(env.COMPANY_TIMEZONE);
   const [yearText, monthText] = date.split('-');
   const year = Number(yearText);
@@ -52,8 +59,9 @@ async function dayContext(userId: string, date: string) {
       isHoliday: Boolean(holiday),
       isOnApprovedLeave: Boolean(leave),
       timesheetStatus: status,
+      bypassPastWindow,
     }),
-    structural: evaluateStructuralLock({ date, today, timesheetStatus: status }),
+    entryWindow: describeEntryWindow(today, env.COMPANY_TIMEZONE),
   };
 }
 
@@ -160,13 +168,14 @@ export const timesheetService = {
 
   async getDaily(actor: ActorContext, date: string, userId = actor.id) {
     await assertCanViewUser(actor, userId);
-    const context = await dayContext(userId, date);
+    const context = await dayContext(userId, date, actor.id === userId && canBypassPastWindow(actor));
     const entries = await loadEntries({ user: userId, date });
     const totalMinutes = entries.reduce((sum, entry) => sum + entry.durationMinutes, 0);
     return {
       date,
       isFillable: context.fill.isFillable,
       lockReasons: context.fill.lockReasons,
+      entryWindow: context.entryWindow,
       timesheet: context.timesheet ? mapTimesheet(context.timesheet) : null,
       entries: entries.map((entry) => mapEntry(entry)),
       totalMinutes,
@@ -220,7 +229,7 @@ export const timesheetService = {
 
   async createEntry(actor: ActorContext, body: EntryBody) {
     const timing = parsedDuration(body.startTime, body.endTime);
-    const context = await dayContext(actor.id, body.date);
+    const context = await dayContext(actor.id, body.date, canBypassPastWindow(actor));
     if (!context.fill.isFillable) throwLocked(context.fill.lockReasons);
     const work = await resolveWork(actor.id, body);
     await assertNoOverlap(actor.id, body.date, timing.startMinutes, timing.endMinutes);
@@ -266,17 +275,18 @@ export const timesheetService = {
     if (!entry) throw new AppError(404, 'NOT_FOUND', 'Timesheet entry not found');
     if (String(entry.user) !== actor.id) throw new AppError(403, 'FORBIDDEN', 'You cannot edit this entry');
     const timing = parsedDuration(body.startTime, body.endTime);
-    const current = await dayContext(actor.id, entry.date);
-    if (current.structural.locked) throwLocked(current.structural.lockReasons);
+    const bypass = canBypassPastWindow(actor);
+    const current = await dayContext(actor.id, entry.date, bypass);
+    if (!current.fill.isFillable) throwLocked(current.fill.lockReasons);
     if (body.date !== entry.date) {
-      const next = await dayContext(actor.id, body.date);
+      const next = await dayContext(actor.id, body.date, bypass);
       if (!next.fill.isFillable) throwLocked(next.fill.lockReasons);
     }
     const work = await resolveWork(actor.id, body);
     await assertNoOverlap(actor.id, body.date, timing.startMinutes, timing.endMinutes, entryId);
 
     const previousTimesheetId = String(entry.timesheet);
-    const nextContext = await dayContext(actor.id, body.date);
+    const nextContext = await dayContext(actor.id, body.date, bypass);
     const nextTimesheet = await getOrCreateTimesheet(actor.id, nextContext.year, nextContext.month);
     if (nextTimesheet.status === 'submitted' || nextTimesheet.status === 'approved') {
       throwLocked(nextTimesheet.status === 'approved' ? ['approved'] : ['pending_approval']);
@@ -320,8 +330,8 @@ export const timesheetService = {
     const entry = await TimesheetEntry.findById(entryId);
     if (!entry) throw new AppError(404, 'NOT_FOUND', 'Timesheet entry not found');
     if (String(entry.user) !== actor.id) throw new AppError(403, 'FORBIDDEN', 'You cannot delete this entry');
-    const context = await dayContext(actor.id, entry.date);
-    if (context.structural.locked) throwLocked(context.structural.lockReasons);
+    const context = await dayContext(actor.id, entry.date, canBypassPastWindow(actor));
+    if (!context.fill.isFillable) throwLocked(context.fill.lockReasons);
     const timesheetId = String(entry.timesheet);
     const date = entry.date;
     await entry.deleteOne();
@@ -351,9 +361,11 @@ export const timesheetService = {
     if (!timesheet) throw new AppError(404, 'NOT_FOUND', 'Timesheet not found');
     if (String(timesheet.user) !== actor.id) throw new AppError(403, 'FORBIDDEN', 'You cannot submit this timesheet');
     const today = todayDateString(env.COMPANY_TIMEZONE);
+    const yesterday = addDays(today, -1);
     const sheetKey = `${timesheet.year}-${String(timesheet.month).padStart(2, '0')}`;
-    if (sheetKey < monthKey(today)) throw new AppError(409, 'PREVIOUS_MONTH', 'Previous months are locked.');
-    if (sheetKey > monthKey(today)) throw new AppError(409, 'NOT_FILLABLE', 'Future dates cannot be filled.');
+    const coversOpenDay = sheetKey === monthKey(today) || sheetKey === monthKey(yesterday);
+    if (!coversOpenDay && sheetKey < monthKey(today)) throw new AppError(409, 'PREVIOUS_MONTH', 'Previous months are locked.');
+    if (!coversOpenDay && sheetKey > monthKey(today)) throw new AppError(409, 'NOT_FILLABLE', 'Future dates cannot be filled.');
     if (timesheet.status !== 'draft' && timesheet.status !== 'rejected') {
       throw new AppError(409, 'INVALID_STATUS', 'Only draft or rejected timesheets can be submitted');
     }

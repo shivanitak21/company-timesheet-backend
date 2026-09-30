@@ -6,7 +6,7 @@ import { Timesheet } from '../models/Timesheet';
 import { TimesheetEntry } from '../models/TimesheetEntry';
 import type { ActorContext } from '../types/actor';
 import { daysInMonth, isFutureDate, isPreviousMonth, isWeekendDate, todayDateString, weekdayIndex } from '../utils/dates';
-import { evaluateFillability } from '../utils/fillability';
+import { describeEntryWindow, evaluateFillability } from '../utils/fillability';
 import { mapAttendance, mapTimesheet } from '../utils/mappers';
 import { summarizeEntries } from '../utils/totals';
 import { assertCanViewUser } from './access.service';
@@ -15,6 +15,7 @@ export async function getMonthCalendar(actor: ActorContext, year: number, month:
   const userId = requestedUserId ?? actor.id;
   await assertCanViewUser(actor, userId);
   const today = todayDateString(env.COMPANY_TIMEZONE);
+  const bypassPastWindow = actor.id === userId && env.entryWindowOverrideRoles.includes(actor.role);
   const days = daysInMonth(year, month);
   const start = days[0] ?? `${year}-01-01`;
   const end = days[days.length - 1] ?? start;
@@ -41,6 +42,7 @@ export async function getMonthCalendar(actor: ActorContext, year: number, month:
     year,
     month,
     today,
+    entryWindow: describeEntryWindow(today, env.COMPANY_TIMEZONE),
     timesheet: timesheet ? mapTimesheet({ ...timesheet, totalMinutes: summary.monthlyTotalMinutes }) : null,
     ...summary,
     days: days.map((date) => {
@@ -52,6 +54,7 @@ export async function getMonthCalendar(actor: ActorContext, year: number, month:
         isHoliday: Boolean(holiday),
         isOnApprovedLeave: Boolean(leave),
         timesheetStatus: timesheet?.status ?? null,
+        bypassPastWindow,
       });
       const totals = minutesByDate.get(date);
       const punch = attendanceByDate.get(date);

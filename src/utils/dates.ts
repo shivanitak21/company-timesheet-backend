@@ -22,6 +22,15 @@ export function isFutureDate(dateStr: string, today: string): boolean {
   return dateStr > today;
 }
 
+export function entryWindowBounds(today: string): { openFrom: string; openThrough: string } {
+  return { openFrom: addDays(today, -1), openThrough: today };
+}
+
+export function isWithinEntryWindow(dateStr: string, today: string): boolean {
+  const { openFrom, openThrough } = entryWindowBounds(today);
+  return dateStr >= openFrom && dateStr <= openThrough;
+}
+
 export function isPreviousMonth(dateStr: string, today: string): boolean {
   return monthKey(dateStr) < monthKey(today);
 }

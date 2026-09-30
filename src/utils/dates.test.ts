@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { addDays, diffDays, daysInMonth, isPreviousMonth, isWeekendDate, isoWeekStart, weekdayIndex } from './dates';
+import { addDays, diffDays, daysInMonth, entryWindowBounds, isPreviousMonth, isWeekendDate, isoWeekStart, isWithinEntryWindow, weekdayIndex } from './dates';
 
 describe('dates', () => {
   it('knows 29 Sep 2026 is a Tuesday', () => {
@@ -15,6 +15,9 @@ describe('dates', () => {
     assert.equal(isPreviousMonth('2026-09-01', '2026-09-29'), false);
     assert.equal(isoWeekStart('2026-09-29'), '2026-09-28');
     assert.equal(addDays('2026-09-30', 1), '2026-10-01');
+    assert.deepEqual(entryWindowBounds('2026-09-30'), { openFrom: '2026-09-29', openThrough: '2026-09-30' });
+    assert.equal(isWithinEntryWindow('2026-09-29', '2026-09-30'), true);
+    assert.equal(isWithinEntryWindow('2026-09-28', '2026-09-30'), false);
     assert.equal(diffDays('2026-09-01', '2026-09-30'), 29);
   });
 

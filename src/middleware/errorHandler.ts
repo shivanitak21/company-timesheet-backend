@@ -34,6 +34,8 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, req, res, next) 
     }
     res.status(err.statusCode).json({
       success: false,
+      code: err.code,
+      message: err.message,
       error: {
         code: err.code,
         message: err.message,

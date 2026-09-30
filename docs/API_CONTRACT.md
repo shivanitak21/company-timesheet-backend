@@ -76,7 +76,9 @@ User:
 
 Roles: `employee`, `manager`, `admin`.
 
-Lock reasons: `weekend`, `holiday`, `leave`, `future`, `previous_month`, `pending_approval`, `approved`.
+Lock reasons: `weekend`, `holiday`, `leave`, `future`, `previous_month`, `entry_window`, `pending_approval`, `approved`.
+
+Calendar responses include `entryWindow`: `{ timezone, today, yesterday, openFrom, openThrough, message }`. Employees may create, edit, and delete entries only for `openFrom` through `openThrough` (today and yesterday in `COMPANY_TIMEZONE`). Older dates return `409 TIMESHEET_ENTRY_WINDOW_CLOSED`. Future dates are never writable. `TIMESHEET_ENTRY_WINDOW_OVERRIDE_ROLES` can let listed roles edit their own older entries.
 
 Timesheet status: `draft`, `submitted`, `approved`, `rejected`.
 
@@ -317,7 +319,7 @@ Calendar day (trimmed):
 
 `weekday` is `0` Sunday through `6` Saturday.
 
-Entry errors: `409 NOT_FILLABLE`, `409 TIMESHEET_LOCKED`, `409 OVERLAPPING_ENTRY`, `409 ENTRY_LIMIT`, `403 FORBIDDEN`, `404 NOT_FOUND`.
+Entry errors: `409 TIMESHEET_ENTRY_WINDOW_CLOSED`, `409 NOT_FILLABLE`, `409 TIMESHEET_LOCKED`, `409 OVERLAPPING_ENTRY`, `409 ENTRY_LIMIT`, `403 FORBIDDEN`, `404 NOT_FOUND`. Window errors include top-level `code` and `message` plus the nested `error` object.
 
 Submit errors: `409 EMPTY_TIMESHEET`, `409 INVALID_STATUS`, `409 PREVIOUS_MONTH`.
 

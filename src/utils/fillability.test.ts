@@ -46,4 +46,27 @@ describe('fillability', () => {
     const approved = evaluateStructuralLock({ date: '2026-09-29', today, timesheetStatus: 'approved' });
     assert.equal(approved.locked, true);
   });
+
+  it('opens only today and yesterday in the company calendar', () => {
+    const sept30 = '2026-09-30';
+    const open = (date: string, todayDate: string, bypassPastWindow = false) =>
+      evaluateFillability({ date, today: todayDate, isHoliday: false, isOnApprovedLeave: false, timesheetStatus: 'draft', bypassPastWindow });
+
+    assert.equal(open('2026-09-30', sept30).isFillable, true);
+    assert.equal(open('2026-09-29', sept30).isFillable, true);
+    assert.ok(open('2026-09-28', sept30).lockReasons.includes('entry_window'));
+    assert.ok(open('2026-10-01', sept30).lockReasons.includes('entry_window'));
+    assert.ok(open('2026-10-01', sept30).lockReasons.includes('future'));
+
+    const oct1 = '2026-10-01';
+    assert.equal(open('2026-10-01', oct1).isFillable, true);
+    assert.equal(open('2026-09-30', oct1).isFillable, true);
+    assert.equal(open('2026-09-30', oct1).lockReasons.includes('previous_month'), false);
+    assert.ok(open('2026-09-29', oct1).lockReasons.includes('entry_window'));
+    assert.ok(open('2026-10-02', oct1).lockReasons.includes('entry_window'));
+
+    const bypassed = open('2026-09-28', sept30, true);
+    assert.equal(bypassed.lockReasons.includes('entry_window'), false);
+    assert.ok(open('2026-10-01', sept30, true).lockReasons.includes('entry_window'));
+  });
 });

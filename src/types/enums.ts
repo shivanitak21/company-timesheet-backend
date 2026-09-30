@@ -37,6 +37,7 @@ export const LOCK_REASONS = [
   'leave',
   'future',
   'previous_month',
+  'entry_window',
   'pending_approval',
   'approved',
 ] as const;
